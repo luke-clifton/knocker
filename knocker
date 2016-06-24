@@ -166,7 +166,7 @@ function parseKnockerfile()
 }
 
 SHELL_TOOLS="busybox"
-NIXPKGS='<nixpgks>'
+NIXPKGS='<nixpkgs>'
 INTERACTIVE="NO"
 
 if [ -f Knockerfile ]
@@ -241,7 +241,7 @@ ROOTS_TMP=$(mktemp -d)
 
 for d in "${PACKAGES[@]}"
 do
-    D="$(nix-build '<nixpkgs>' -o "$ROOTS_TMP/$d" -A $d)"
+    D="$(nix-build "$NIXPKGS" -o "$ROOTS_TMP/$d" -A $d)"
     case $d in
         $SHELL_TOOLS)
             SHELL_TOOLS_D=$D
@@ -260,7 +260,7 @@ done
 RES_COUNT=0
 for e in "${EXPRESSIONS[@]}"
 do
-    EXPR="with import <nixpkgs> { }; $e"
+    EXPR="with import $NIXPKGS { }; $e"
     echo $EXPR
     D="$(nix-build -E "$EXPR" -o "$ROOTS_TMP/result-$RES_COUNT")"
     RES_COUNT=$(( $RES_COUNT + 1 ))
