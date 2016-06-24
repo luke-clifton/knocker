@@ -1,0 +1,21 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <title>Knocker</title>
+  <style type="text/css">code{white-space: pre;}</style>
+</head>
+<body>
+<div id="header">
+<h1 class="title">Knocker</h1>
+</div>
+<pre><code>Nix + Docker = Knocker</code></pre>
+<p>Build (ideally) minimal docker images for deployment. Knocker copies only the runtime dependencies of your app into the docker image. No package manager, no shell, no glibc. Nothing else is copied unless your application depends on it.</p>
+<h1 id="normal-mode">Normal Mode</h1>
+<p>Docker really preferes that you have a shell available, so by default knocker includes busybox in every image.</p>
+<h1 id="interactive-mode">Interactive Mode</h1>
+<p>Drops busybox and adds bash. Also adds some scripts to be sourced by bash which set up a bunch of important environment variables such as <code>CLASSPATH</code> and <code>PYTHONPATH</code>.</p>
+</body>
+</html>

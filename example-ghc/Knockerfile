@@ -1,0 +1,2 @@
+EXPR pkgs.haskellPackages.callPackage ./default.nix {}
+EXEC example-ghc

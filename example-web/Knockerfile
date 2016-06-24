@@ -1,0 +1,5 @@
+EXPOSE 80
+WORKDIR /www
+COPY ./www /
+PKG webfs
+EXEC webfsd -F -L - -f index.html -p 80 -4

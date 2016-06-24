@@ -1,0 +1,5 @@
+INTERACTIVE
+PKG python
+PKG pythonPackages.bpython
+PKG pythonPackages.scipy
+EXEC bash -c bpython

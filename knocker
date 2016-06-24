@@ -1,0 +1,375 @@
+#! /usr/bin/env sh
+
+set -e
+# shopt -s extglob
+
+TMP=$(mktemp -d)
+
+function usage()
+{
+    rm -Rf "$TMP"
+    cat <<END
+USAGE:
+    $0 [OPTIONS | PACKAGE]
+
+    PACKAGE
+        Attribute of the Nix package you want to include.
+
+    OPTIONS
+        -f KNOCKERFILE
+            Read this file like it was a Knockerfile. Overrides any settings
+            set before it.
+
+        -d DERIVATION
+            Add a derivation directly from the store (or a symlink to one)
+
+            Useful if you have a default.nix, and you just did a nix-build
+            and would like to include the result.
+
+                nix-build && knocker -d result
+
+        -i
+            Set up the shell environment for interactive work.
+            This includes setting up PYTHONPATH and other such things.
+            
+            This will cause bashInteractive to be installed instead of
+            busybox.
+
+            You will need to start programs via bash, rather than sh.
+
+            Instead of
+                -e python
+            You will need to do
+                -e '["bash", "-c", "python"]'
+            or if you are lazy and don't care about two shells being launched
+                -e 'bash -c python'
+
+        -e CMD
+            Specify the command to execute when the docker image is run.
+            Uses the same syntax as the CMD command in Docker.
+
+                -e '["ls","-l"]'
+                -e 'ls *'
+
+        -n NIXPKGS
+            Which Nixpkgs. Defaults to '<nixpkgs>'
+
+        -w WORKDIR
+            Set the working directory. Will also create the specified
+            directory.
+
+        -U USER
+            Add USER to the list of users. (UID > 1000)
+
+        -S USER
+            Add system USER to the list of users (UID < 1000)
+
+        -c SRC DST
+            Copy SRC on the host to DST in the image.
+END
+}
+
+function addPackage()
+{
+    PACKAGES+=("$1")
+}
+
+function makeInteractive()
+{
+    SHELL_TOOLS="bashInteractive"
+    addPackage coreutils
+    addPackage stdenv
+    INTERACTIVE=YES
+}
+
+function copyFile()
+{
+    mkdir -p "$TMP/$(dirname "$2")"
+    cp -r $1 "$TMP/$2"
+}
+
+function addDockerCmd()
+{
+    EXTRA_DOCKER+=$(echo $@)
+}
+
+function addPath()
+{
+    if [ ! -z "$PATHS" ]
+    then
+        PATHS="$1:$PATHS"
+    else
+        PATHS="$1"
+    fi
+}
+
+function addDerivation()
+{
+    D="$(readlink -f "$1")"
+    DERIVATIONS+=("$D")
+    addPath "$D/bin"
+}
+
+
+function parseKnockerfile()
+{
+    while read -a CMD
+    do
+        case "${CMD[0]}" in
+            NIXPKGS)
+                NIXPKGS="${CMD[1]}"
+                ;;
+            IMPORT)
+                for ifile in "${CMD[*]#${CMD[0]}}"
+                do
+                    if [ ! -f "$ifile" ]
+                    then
+                        echo "Cannot find '$ifile'" >&2
+                        exit 1
+                    fi
+                    parseKnockerfile <"$ifile"
+                done
+                ;;
+            EXPOSE)
+                addDockerCmd ${CMD[*]}
+                ;;
+            EXPR)
+                EXPRESSIONS+=("${CMD[*]#${CMD[0]}}")
+                ;;
+            INTERACTIVE)
+                makeInteractive
+                ;;
+            WORKDIR)
+                WORK_DIR="${CMD[1]}"
+                ;;
+            PKG)
+                addPackage "${CMD[1]}"
+                ;;
+            EXEC)
+                EXEC="${CMD[*]#${CMD[0]}}"
+                ;;
+            USER)
+                USERS+=("${CMD[*]#${CMD[0]}}")
+                ;;
+            SYSUSER)
+                SYSTEM_USERS+=("${CMD[*]#${CMD[0]}}")
+                ;;
+            COPY)
+                copyFile "${CMD[1]}" "${CMD[2]}"
+                ;;
+            *)
+                echo "Unknown command '${CMD[*]}'" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+SHELL_TOOLS="busybox"
+NIXPKGS='<nixpgks>'
+INTERACTIVE="NO"
+
+if [ -f Knockerfile ]
+then
+    parseKnockerfile <Knockerfile
+fi
+
+while [[ $# > 0 ]]
+do
+    key="$1"
+    shift
+    case $key in
+        --help)
+            usage
+            exit 0
+            ;;
+        -i)
+            makeInteractive
+            ;;
+        -d)
+            addDerivation "$1"
+            shift
+            ;;
+        -w)
+            WORK_DIR="$1"
+            shift
+            ;;
+        -e)
+            EXEC="$1"
+            shift
+            ;;
+        -U)
+            USERS+=("$1")
+            shift
+            ;;
+        -S)
+            SYSTEM_USERS+=("$1")
+            shift
+            ;;
+        -c)
+            copyFile "$1" "$2"
+            shift
+            shift
+            ;;
+        -n)
+            NIXPKGS=$1
+            shift
+            ;;
+        -f)
+            if [ ! -f "$1" ]
+            then
+                echo "Cannot find '$1'" >&2
+                exit 1
+            fi
+            parseKnockerfile <$1
+            shift
+            ;;
+        -*)
+            echo "Unknown options '$key'" >&2
+            usage >&2
+            exit 1
+            ;;
+        *)
+            addPackage $key
+            ;;
+    esac
+done
+
+PACKAGES+=("$SHELL_TOOLS")
+
+ROOTS_TMP=$(mktemp -d)
+
+for d in "${PACKAGES[@]}"
+do
+    D="$(nix-build '<nixpkgs>' -o "$ROOTS_TMP/$d" -A $d)"
+    case $d in
+        $SHELL_TOOLS)
+            SHELL_TOOLS_D=$D
+            ;;
+        stdenv)
+            STDENV_D=$D
+            ;;
+    esac
+    DERIVATIONS+=("$D")
+    if [ -d "$D/bin" ]
+    then
+        addPath "$D/bin"
+    fi
+done
+
+RES_COUNT=0
+for e in "${EXPRESSIONS[@]}"
+do
+    EXPR="with import <nixpkgs> { }; $e"
+    echo $EXPR
+    D="$(nix-build -E "$EXPR" -o "$ROOTS_TMP/result-$RES_COUNT")"
+    RES_COUNT=$(( $RES_COUNT + 1 ))
+    DERIVATIONS+=("$D")
+    if [ -d "$D/bin" ]
+    then
+        addPath "$D/bin"
+    fi
+done
+
+CLOSURE=$(nix-store -q -R ${DERIVATIONS[*]})
+
+echo $CLOSURE
+
+cd $TMP
+
+mkdir -p bin
+mkdir -p etc
+mkdir -p root
+mkdir -m 555 -p var/empty
+
+if [ $(( ${#USERS} + ${#SYSTEM_USERS} )) -gt 0 ]
+then
+    mkdir -p /home
+fi
+
+ln -s "$SHELL_TOOLS_D/bin/sh" bin/sh
+
+
+(cat <<END
+Dockerfile
+.*
+END
+) > .dockerignore
+
+(cat <<END
+hosts: files dns
+END
+) > etc/nsswitch.conf
+chmod 644 etc/nsswitch.conf
+
+(cat <<END
+root:x:0:0:System administrator:/root:/bin/sh
+nobody:x:65534:65534:Unprivileged account:/var/empty:/bin/sh
+END
+) > etc/passwd
+chmod 644 etc/passwd
+
+(cat <<END
+root:x:0:
+nogroup:x:65534:
+END
+) > etc/group
+chmod 644 etc/group
+
+(cat <<END
+FROM scratch
+COPY . /
+ENV PATH $PATHS
+END
+) > Dockerfile
+
+echo $EXTRA_DOCKER >> Dockerfile
+
+if [ "$INTERACTIVE" = YES ]
+then
+    (cat <<END
+. $STDENV_D/setup
+set +e
+END
+) > etc/profile
+    (cat <<END
+. /etc/profile
+END
+) > etc/bashrc
+    (cat <<END
+ENV ENV /etc/profile
+ENV BASH_ENV /etc/profile
+ENV out /var/empty
+ENV nativeBuildInputs ${DERIVATIONS[*]}
+END
+) >> Dockerfile
+fi
+
+if [ ! -z "$WORK_DIR" ]
+then
+    mkdir -p "$WORK_DIR"
+    (cat <<END
+WORKDIR $WORK_DIR
+END
+) >> Dockerfile
+fi
+
+for u in "${USERS[@]}"
+do
+    echo "RUN adduser -D -s /bin/sh \"$u\"" >> Dockerfile
+done
+
+for u in "${SYSTEM_USERS[@]}"
+do
+    echo "RUN adduser -D -s /bin/sh -S \"$u\"" >> Dockerfile
+done
+
+if [ ! -z "$EXEC" ]
+then
+    echo "CMD $EXEC" >> Dockerfile
+fi
+
+tar -c . $CLOSURE | docker build -
+
+rm -Rf "$ROOTS_TMP"
+rm -Rf "$TMP"
