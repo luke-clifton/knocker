@@ -10,6 +10,11 @@ The final image is **NOT** a NixOS container. It is nothing but your
 application. It does not include the package manager, or anything
 else.
 
+Dependencies
+------------
+
+In order to run knocker you will need bash, nix, and docker installed.
+
 Usage
 -----
 
@@ -77,3 +82,11 @@ Simply copy the `knocker` script onto your path and set it as executable.
 
             -c SRC DST
                 Copy SRC on the host to DST in the image.
+
+
+Examples
+--------
+
+The `examples-*` directories demonstrate some usage examples of knocker.
+
+Simply `cd` into the directory and run `knocker`.
